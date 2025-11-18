@@ -109,7 +109,8 @@ def init(endpoint, database, cert_file, user, password, scale, processes):
 @click.option('--workers', default=7, help='Number of async workers per process (default: 7)')
 @click.option('--transactions', default=100, help='Number of transactions per worker (default: 100)')
 @click.option('--processes', default=1, help='Number of parallel processes (default: 1)')
-def run(endpoint, database, cert_file, user, password, scale, workers, transactions, processes):
+@click.option('--single-session', is_flag=True, help='Use single session mode instead of pooled mode')
+def run(endpoint, database, cert_file, user, password, scale, workers, transactions, processes, single_session):
     """Run workload against the database."""
     # Get configuration from CLI options or environment variables
     endpoint = get_config_value(endpoint, 'YDB_ENDPOINT', required=True)
@@ -118,14 +119,15 @@ def run(endpoint, database, cert_file, user, password, scale, workers, transacti
     user = get_config_value(user, 'YDB_USER')
     password = get_config_value(password, 'YDB_PASSWORD')
     
-    click.echo(f"Running workload with scale={scale}, workers={workers}, transactions={transactions}, processes={processes}")
+    mode = "single session" if single_session else "pooled"
+    click.echo(f"Running workload with scale={scale}, workers={workers}, transactions={transactions}, processes={processes}, mode={mode}")
     
     def run_worker(process_id):
         """Worker function for multiprocessing."""
         if processes > 1:
             click.echo(f"Process {process_id} started")
         runner = create_runner_from_config(endpoint, database, cert_file, user, password)
-        runner.run(workers, transactions, scale)
+        runner.run(workers, transactions, scale, single_session)
     
     if processes == 1:
         # Single process execution

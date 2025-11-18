@@ -77,7 +77,7 @@ class Runner:
         
         asyncio.run(_init())
 
-    def run(self, worker_count: int = 7, tran_count: int = 100, scale: int = 100):
+    def run(self, worker_count: int = 7, tran_count: int = 100, scale: int = 100, use_single_session: bool = False):
         """
         Run workload with specified number of workers and transactions.
         
@@ -85,8 +85,9 @@ class Runner:
             worker_count: Number of parallel workers
             tran_count: Number of transactions per worker
             scale: Number of branches (must not exceed initialized branches)
+            use_single_session: If True, use single session mode; if False, use pooled mode (default)
         """
-        asyncio.run(self._execute_parallel(worker_count, tran_count, scale))
+        asyncio.run(self._execute_parallel(worker_count, tran_count, scale, use_single_session))
     
     async def _validate_scale(self, pool: ydb.aio.QuerySessionPool, scale: int):
         """
@@ -117,7 +118,7 @@ class Runner:
         
         logger.info(f"Scale validation passed: {scale} <= {branch_count} branches")
 
-    async def _execute_parallel(self, worker_count: int, tran_count: int, scale: int):
+    async def _execute_parallel(self, worker_count: int, tran_count: int, scale: int, use_single_session: bool):
         """
         Execute workload in parallel with multiple workers.
         
@@ -125,8 +126,12 @@ class Runner:
             worker_count: Number of parallel workers
             tran_count: Number of transactions per worker
             scale: Number of branches to distribute across workers
+            use_single_session: If True, use single session mode; if False, use pooled mode
         """
         from worker import Worker
+        
+        mode = "single session" if use_single_session else "pooled"
+        logger.info(f"Starting workload in {mode} mode")
         
         async with self._get_pool() as pool:
             # Validate scale before starting workers
@@ -137,5 +142,9 @@ class Runner:
                     bid_from = math.floor(float(scale)/worker_count*i)+1
                     bid_to = math.floor(float(scale)/worker_count*(i+1))
                     worker = Worker(bid_from, bid_to, tran_count)
-                    tg.create_task(worker.execute_pooled(pool))
+                    
+                    if use_single_session:
+                        tg.create_task(worker.execute_single_session(pool))
+                    else:
+                        tg.create_task(worker.execute_pooled(pool))
             logger.info("All workers completed")
