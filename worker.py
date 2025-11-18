@@ -2,69 +2,52 @@ import ydb
 import logging
 import time
 from random import randint
+from typing import Optional
 from constants import TELLERS_PER_BRANCH, ACCOUNTS_PER_BRANCH
 from metrics import MetricsCollector
+from base_executor import BaseExecutor
 
 logger = logging.getLogger(__name__)
 
 
-class Worker:
-    def __init__(self, bid_from: int, bid_to: int, count: int, metrics_collector: MetricsCollector = None, table_folder: str = "pgbench"):
+class Worker(BaseExecutor):
+    """
+    Executes pgbench-like workload transactions.
+    
+    Uses random branch selection within the range for each transaction.
+    """
+    
+    def __init__(
+        self,
+        bid_from: int,
+        bid_to: int,
+        tran_count: int,
+        metrics_collector: Optional[MetricsCollector] = None,
+        table_folder: str = "pgbench",
+        use_single_session: bool = False
+    ):
         """
         Initialize a worker that executes transactions.
         
         Args:
             bid_from: Starting branch ID (inclusive)
             bid_to: Ending branch ID (inclusive)
-            count: Number of transactions to execute
+            tran_count: Number of transactions to execute
             metrics_collector: Optional metrics collector for tracking performance
             table_folder: Folder name for tables (default: "pgbench")
+            use_single_session: If True, use single session mode; if False, use pooled mode
         """
-        self._bid_from = bid_from
-        self._bid_to = bid_to
-        self._count = count
-        self._bid = None
-        self._metrics = metrics_collector
-        self._table_folder = table_folder
+        super().__init__(bid_from, bid_to, tran_count, metrics_collector, table_folder, use_single_session)
 
-    async def execute_pooled(self, pool: ydb.aio.QuerySessionPool):
-        """
-        Execute transactions using the pool's retry mechanism.
-        
-        Args:
-            pool: YDB query session pool
-        """
-        logger.info(f"Worker [{self._bid_from}, {self._bid_to}] started")
-        for i in range(self._count):
-            self._bid = randint(self._bid_from, self._bid_to)
-            await pool.retry_operation_async(self._execute_workload)
-        logger.info(f"Worker [{self._bid_from}, {self._bid_to}] completed")
-
-    async def execute_single_session(self, pool: ydb.aio.QuerySessionPool):
-        """
-        Execute transactions using a single acquired session.
-        
-        Args:
-            pool: YDB query session pool
-        """
-        logger.info(f"Worker [{self._bid_from}, {self._bid_to}] started")
-        session = await pool.acquire()
-        try:
-            for i in range(self._count):
-                self._bid = randint(self._bid_from, self._bid_to)
-                await self._execute_workload(session)
-        finally:
-            await pool.release(session)
-        logger.info(f"Worker [{self._bid_from}, {self._bid_to}] completed")
-
-    async def _execute_workload(self, session: ydb.aio.QuerySession):
+    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
         """
         Execute a single pgbench-like transaction.
         
         Args:
             session: YDB query session
+            iteration: Current iteration number (0-based)
         """
-        bid = self._bid
+        bid = randint(self._bid_from, self._bid_to)
         tid = (bid - 1) * TELLERS_PER_BRANCH + randint(1, TELLERS_PER_BRANCH)
         aid = (bid - 1) * ACCOUNTS_PER_BRANCH + randint(1, ACCOUNTS_PER_BRANCH)
         delta = randint(1, 1000)
@@ -103,7 +86,7 @@ class Worker:
             success = True
         except Exception as e:
             error_message = str(e)
-            logger.error(f"Transaction failed for bid={self._bid}: {e}", exc_info=True)
+            logger.error(f"Transaction failed for bid={bid}: {e}", exc_info=True)
             raise
         finally:
             end_time = time.time()

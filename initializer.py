@@ -1,18 +1,37 @@
 import ydb
+from typing import Optional
 from constants import TELLERS_PER_BRANCH, ACCOUNTS_PER_BRANCH
+from metrics import MetricsCollector
+from base_executor import BaseExecutor
 
 
-class Initializer:
-    def __init__(self, scale: int = 100, table_folder: str = "pgbench"):
+class Initializer(BaseExecutor):
+    """
+    Initializes pgbench database schema and data.
+    
+    Uses sequential branch processing within the range.
+    """
+    
+    def __init__(
+        self,
+        bid_from: int,
+        bid_to: int,
+        metrics_collector: Optional[MetricsCollector] = None,
+        table_folder: str = "pgbench",
+        use_single_session: bool = False
+    ):
         """
-        Initialize the Initializer with a scale factor.
+        Initialize Initializer with branch range.
         
         Args:
-            scale: Number of branches to create (default: 100)
-            table_folder: Folder name for tables (default: "pgbench")
+            bid_from: Starting branch ID (inclusive)
+            bid_to: Ending branch ID (inclusive)
+            metrics_collector: Optional metrics collector
+            table_folder: Folder name for tables
+            use_single_session: If True, use single session mode; if False, use pooled mode
         """
-        self._scale = scale
-        self._table_folder = table_folder
+        count = bid_to - bid_from + 1
+        super().__init__(bid_from, bid_to, count, metrics_collector, table_folder, use_single_session)
 
     async def create_tables(self, pool: ydb.aio.QuerySessionPool):
         """Create the pgbench tables in the database."""
@@ -61,54 +80,52 @@ class Initializer:
             """
         )
 
-    async def fill_branch(self, pool: ydb.aio.QuerySessionPool, bid: int):
+    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
         """
-        Fill data for a single branch. Called in parallel by Runner.
+        Fill data for a single branch.
         
         Args:
-            pool: YDB query session pool
-            bid: Branch ID to fill
-            
-        Raises:
-            ValueError: If bid is out of valid range [1, scale]
+            session: YDB query session
+            iteration: Current iteration number (0-based)
         """
-        if bid < 1 or bid > self._scale:
-            raise ValueError(f"Branch ID {bid} is out of valid range [1, {self._scale}]")
+        bid = self._bid_from + iteration
         
-        await pool.execute_with_retries(
-            f"""
-            $d = SELECT d FROM (SELECT AsList(0,1,2,3,4,5,6,7,8,9) as d) FLATTEN LIST BY (d);
+        async with session.transaction() as tx:
+            await tx.execute(
+                f"""
+                $d = SELECT d FROM (SELECT AsList(0,1,2,3,4,5,6,7,8,9) as d) FLATTEN LIST BY (d);
 
-            REPLACE INTO `{self._table_folder}/branches`(bid, bbalance, filler)
-            VALUES ($bid, 0 , null);
+                REPLACE INTO `{self._table_folder}/branches`(bid, bbalance, filler)
+                VALUES ($bid, 0 , null);
 
-            REPLACE INTO `{self._table_folder}/tellers`(tid, bid, tbalance, filler)
-            SELECT
-                ($bid-1)*$tellers_per_branch+d1.d+1 as tid, $bid, 0 , null
-            FROM
-                $d as d1;
-
-            REPLACE INTO `{self._table_folder}/accounts`(aid, bid, abalance, filler)
-            SELECT
-                ($bid-1)*$accounts_per_branch + rn + 1 as aid,
-                $bid as bid,
-                0 as abalance,
-                null as filler
-            FROM (
+                REPLACE INTO `{self._table_folder}/tellers`(tid, bid, tbalance, filler)
                 SELECT
-                    d1.d+d2.d*10+d3.d*100+d4.d*1000+d5.d*10000 as rn
+                    ($bid-1)*$tellers_per_branch+d1.d+1 as tid, $bid, 0 , null
                 FROM
-                    -- 100k rows
-                    $d as d1
-                    CROSS JOIN $d as d2
-                    CROSS JOIN $d as d3
-                    CROSS JOIN $d as d4
-                    CROSS JOIN $d as d5
-                ) t
-            """,
-            parameters={
-                    "$bid": ydb.TypedValue(bid, ydb.PrimitiveType.Int32),
-                    "$tellers_per_branch": ydb.TypedValue(TELLERS_PER_BRANCH, ydb.PrimitiveType.Int32),
-                    "$accounts_per_branch": ydb.TypedValue(ACCOUNTS_PER_BRANCH, ydb.PrimitiveType.Int32)
-            }
-        )
+                    $d as d1;
+
+                REPLACE INTO `{self._table_folder}/accounts`(aid, bid, abalance, filler)
+                SELECT
+                    ($bid-1)*$accounts_per_branch + rn + 1 as aid,
+                    $bid as bid,
+                    0 as abalance,
+                    null as filler
+                FROM (
+                    SELECT
+                        d1.d+d2.d*10+d3.d*100+d4.d*1000+d5.d*10000 as rn
+                    FROM
+                        -- 100k rows
+                        $d as d1
+                        CROSS JOIN $d as d2
+                        CROSS JOIN $d as d3
+                        CROSS JOIN $d as d4
+                        CROSS JOIN $d as d5
+                    ) t
+                """,
+                parameters={
+                        "$bid": ydb.TypedValue(bid, ydb.PrimitiveType.Int32),
+                        "$tellers_per_branch": ydb.TypedValue(TELLERS_PER_BRANCH, ydb.PrimitiveType.Int32),
+                        "$accounts_per_branch": ydb.TypedValue(ACCOUNTS_PER_BRANCH, ydb.PrimitiveType.Int32)
+                },
+                commit_tx=True
+            )

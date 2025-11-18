@@ -64,22 +64,48 @@ class Runner:
             async with ydb.aio.QuerySessionPool(driver) as pool:
                 yield pool
 
-    def init_tables(self, scale: int = 100):
-        """Initialize database tables with the specified scale factor."""
+    async def _run_executors_parallel(self, pool: ydb.aio.QuerySessionPool, executors: list):
+        """
+        Run multiple executors in parallel using TaskGroup.
+        
+        Args:
+            pool: YDB query session pool
+            executors: List of BaseExecutor instances to run in parallel
+        """
+        async with asyncio.TaskGroup() as tg:
+            for executor in executors:
+                tg.create_task(executor.execute(pool))
+
+    def init_tables(self, scale: int = 100, worker_count: int = 10):
+        """
+        Initialize database tables with the specified scale factor.
+        
+        Args:
+            scale: Number of branches to create (defines range 1 to scale)
+            worker_count: Number of parallel workers for filling tables (default: 10)
+        """
         from initializer import Initializer
         
-        # Store scale for later use in run()
-        self._scale = scale
+        # Create initializer instances for parallel execution
+        initializers = []
+        for i in range(worker_count):
+            bid_from, bid_to = Runner._make_bid_range(scale, worker_count, i)
+            initializers.append(
+                Initializer(
+                    bid_from,
+                    bid_to,
+                    table_folder=self._table_folder
+                )
+            )
         
         async def _init():
             async with self._get_pool() as pool:
-                initer = Initializer(scale, self._table_folder)
+                # Create tables first (DDL operations)
+                initer = Initializer(1, scale, table_folder=self._table_folder)
                 await initer.create_tables(pool)
                 
-                # Fill tables in parallel using TaskGroup
-                async with asyncio.TaskGroup() as tg:
-                    for i in range(scale):
-                        tg.create_task(initer.fill_branch(pool, i + 1))
+                # Fill tables in parallel
+                await self._run_executors_parallel(pool, initializers)
         
         asyncio.run(_init())
 
@@ -93,8 +119,38 @@ class Runner:
             scale: Number of branches (must not exceed initialized branches)
             use_single_session: If True, use single session mode; if False, use pooled mode (default)
         """
+        from worker import Worker
+        
         metrics = MetricsCollector()
-        asyncio.run(self._execute_parallel(worker_count, tran_count, scale, use_single_session, metrics))
+        
+        # Create worker instances for parallel execution
+        workers = []
+        for i in range(worker_count):
+            bid_from, bid_to = Runner._make_bid_range(scale, worker_count, i)
+            workers.append(
+                Worker(
+                    bid_from,
+                    bid_to,
+                    tran_count,
+                    metrics,
+                    self._table_folder,
+                    use_single_session
+                )
+            )
+        
+        async def _run():
+            mode = "single session" if use_single_session else "pooled"
+            logger.info(f"Starting workload in {mode} mode")
+            
+            async with self._get_pool() as pool:
+                # Validate scale before starting workers
+                await self._validate_scale(pool, scale)
+                
+                # Run workers in parallel
+                await self._run_executors_parallel(pool, workers)
+                logger.info("All workers completed")
+        
+        asyncio.run(_run())
         
         # Print metrics summary after workload completes
         metrics.print_summary()
@@ -130,34 +186,10 @@ class Runner:
         
         logger.info(f"Scale validation passed: {scale} <= {branch_count} branches")
 
-    async def _execute_parallel(self, worker_count: int, tran_count: int, scale: int, use_single_session: bool, metrics: MetricsCollector):
-        """
-        Execute workload in parallel with multiple workers.
-        
-        Args:
-            worker_count: Number of parallel workers
-            tran_count: Number of transactions per worker
-            scale: Number of branches to distribute across workers
-            use_single_session: If True, use single session mode; if False, use pooled mode
-            metrics: MetricsCollector instance for tracking performance
-        """
-        from worker import Worker
-        
-        mode = "single session" if use_single_session else "pooled"
-        logger.info(f"Starting workload in {mode} mode")
-        
-        async with self._get_pool() as pool:
-            # Validate scale before starting workers
-            await self._validate_scale(pool, scale)
-            
-            async with asyncio.TaskGroup() as tg:
-                for i in range(worker_count):
-                    bid_from = math.floor(float(scale)/worker_count*i)+1
-                    bid_to = math.floor(float(scale)/worker_count*(i+1))
-                    worker = Worker(bid_from, bid_to, tran_count, metrics, self._table_folder)
-                    
-                    if use_single_session:
-                        tg.create_task(worker.execute_single_session(pool))
-                    else:
-                        tg.create_task(worker.execute_pooled(pool))
-            logger.info("All workers completed")
+    @staticmethod
+    def _make_bid_range(scale: int, worker_count: int, worker_index: int):
+        return (
+            math.floor(float(scale)/worker_count*worker_index)+1,
+            math.floor(float(scale)/worker_count*(worker_index+1))
+        )
+                                
