@@ -10,7 +10,7 @@ from base_executor import BaseExecutor
 logger = logging.getLogger(__name__)
 
 
-class Worker(BaseExecutor):
+class Job(BaseExecutor):
     """
     Executes pgbench-like workload transactions.
     
@@ -27,7 +27,7 @@ class Worker(BaseExecutor):
         use_single_session: bool = False
     ):
         """
-        Initialize a worker that executes transactions.
+        Initialize a job that executes transactions.
         
         Args:
             bid_from: Starting branch ID (inclusive)

@@ -76,20 +76,20 @@ class Runner:
             for executor in executors:
                 tg.create_task(executor.execute(pool))
 
-    def init_tables(self, scale: int = 100, worker_count: int = 10):
+    def init_tables(self, scale: int = 100, job_count: int = 10):
         """
         Initialize database tables with the specified scale factor.
         
         Args:
             scale: Number of branches to create (defines range 1 to scale)
-            worker_count: Number of parallel workers for filling tables (default: 10)
+            job_count: Number of parallel jobs for filling tables (default: 10)
         """
         from initializer import Initializer
         
         # Create initializer instances for parallel execution
         initializers = []
-        for i in range(worker_count):
-            bid_from, bid_to = Runner._make_bid_range(scale, worker_count, i)
+        for i in range(job_count):
+            bid_from, bid_to = Runner._make_bid_range(scale, job_count, i)
             initializers.append(
                 Initializer(
                     bid_from,
@@ -109,26 +109,26 @@ class Runner:
         
         asyncio.run(_init())
 
-    def run(self, worker_count: int = 7, tran_count: int = 100, scale: int = 100, use_single_session: bool = False):
+    def run(self, job_count: int = 7, tran_count: int = 100, scale: int = 100, use_single_session: bool = False):
         """
-        Run workload with specified number of workers and transactions.
+        Run workload with specified number of jobs and transactions.
         
         Args:
-            worker_count: Number of parallel workers
-            tran_count: Number of transactions per worker
+            job_count: Number of parallel jobs
+            tran_count: Number of transactions per job
             scale: Number of branches (must not exceed initialized branches)
             use_single_session: If True, use single session mode; if False, use pooled mode (default)
         """
-        from worker import Worker
+        from job import Job
         
         metrics = MetricsCollector()
         
-        # Create worker instances for parallel execution
-        workers = []
-        for i in range(worker_count):
-            bid_from, bid_to = Runner._make_bid_range(scale, worker_count, i)
-            workers.append(
-                Worker(
+        # Create job instances for parallel execution
+        jobs = []
+        for i in range(job_count):
+            bid_from, bid_to = Runner._make_bid_range(scale, job_count, i)
+            jobs.append(
+                Job(
                     bid_from,
                     bid_to,
                     tran_count,
@@ -143,12 +143,12 @@ class Runner:
             logger.info(f"Starting workload in {mode} mode")
             
             async with self._get_pool() as pool:
-                # Validate scale before starting workers
+                # Validate scale before starting jobs
                 await self._validate_scale(pool, scale)
                 
-                # Run workers in parallel
-                await self._run_executors_parallel(pool, workers)
-                logger.info("All workers completed")
+                # Run jobs in parallel
+                await self._run_executors_parallel(pool, jobs)
+                logger.info("All jobs completed")
         
         asyncio.run(_run())
         
@@ -187,9 +187,9 @@ class Runner:
         logger.info(f"Scale validation passed: {scale} <= {branch_count} branches")
 
     @staticmethod
-    def _make_bid_range(scale: int, worker_count: int, worker_index: int):
+    def _make_bid_range(scale: int, job_count: int, job_index: int):
         return (
-            math.floor(float(scale)/worker_count*worker_index)+1,
-            math.floor(float(scale)/worker_count*(worker_index+1))
+            math.floor(float(scale)/job_count*job_index)+1,
+            math.floor(float(scale)/job_count*(job_index+1))
         )
                                 
