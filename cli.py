@@ -115,8 +115,9 @@ def init(ctx):
 @click.option('--jobs', '-j', type=int, default=1, help='Number of async jobs per process (default: 1)')
 @click.option('--transactions', '-t', type=int, default=100, help='Number of transactions each job runs (default: 100)')
 @click.option('--single-session', is_flag=True, help='Use single session mode instead of pooled mode')
+@click.option('--file', '-f', type=click.Path(exists=True, readable=True), help='Path to file containing SQL script to execute')
 @click.pass_context
-def run(ctx, jobs, transactions, single_session):
+def run(ctx, jobs, transactions, single_session, file):
     """Run workload against the database."""
     # Get common configuration from context
     endpoint = ctx.obj['endpoint']
@@ -128,6 +129,13 @@ def run(ctx, jobs, transactions, single_session):
     scale = ctx.obj['scale']
     processes = ctx.obj['processes']
     
+    # Read script from file if provided
+    script = None
+    if file:
+        with open(file, 'r') as f:
+            script = f.read()
+        click.echo(f"Using script from file: {file}")
+    
     mode = "single session" if single_session else "pooled"
     click.echo(f"Running workload with table_folder={table_folder}, scale={scale}, jobs={jobs}, transactions={transactions}, processes={processes}, mode={mode}")
     
@@ -136,7 +144,7 @@ def run(ctx, jobs, transactions, single_session):
         if processes > 1:
             click.echo(f"Process {process_id} started")
         runner = create_runner_from_config(endpoint, database, ca_file, user, password, table_folder)
-        runner.run(jobs, transactions, scale, single_session)
+        runner.run(jobs, transactions, scale, single_session, script)
     
     if processes == 1:
         # Single process execution

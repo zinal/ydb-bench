@@ -109,7 +109,7 @@ class Runner:
         
         asyncio.run(_init())
 
-    def run(self, job_count: int = 7, tran_count: int = 100, scale: int = 100, use_single_session: bool = False):
+    def run(self, job_count: int = 7, tran_count: int = 100, scale: int = 100, use_single_session: bool = False, script: Optional[str] = None):
         """
         Run workload with specified number of jobs and transactions.
         
@@ -118,6 +118,7 @@ class Runner:
             tran_count: Number of transactions per job
             scale: Number of branches (must not exceed initialized branches)
             use_single_session: If True, use single session mode; if False, use pooled mode (default)
+            script: Optional SQL script to execute (if None, uses default script)
         """
         from job import Job
         
@@ -134,7 +135,8 @@ class Runner:
                     tran_count,
                     metrics,
                     self._table_folder,
-                    use_single_session
+                    use_single_session,
+                    script
                 )
             )
         
