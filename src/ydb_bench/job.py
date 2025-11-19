@@ -2,7 +2,7 @@ import logging
 import re
 import time
 from random import randint
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import ydb
 
@@ -64,7 +64,7 @@ class Job(BaseExecutor):
         self._uses_delta = "$delta" in self._script
         self._uses_iteration = "$iteration" in self._script
 
-    def _build_parameters(self, iteration: int) -> dict:
+    def _build_parameters(self, iteration: int) -> Dict[str, Any]:
         """
         Build parameters dictionary based on what's used in the script.
         Generates random values for bid, tid, aid, and delta.
@@ -94,7 +94,7 @@ class Job(BaseExecutor):
             parameters["$iteration"] = ydb.TypedValue(iteration, ydb.PrimitiveType.Int32)
         return parameters
 
-    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
+    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int) -> None:
         """
         Execute a single pgbench-like transaction.
 

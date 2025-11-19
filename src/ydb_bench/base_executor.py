@@ -47,7 +47,7 @@ class BaseExecutor:
         self._table_folder = table_folder
         self._use_single_session = use_single_session
 
-    async def execute(self, pool: ydb.aio.QuerySessionPool):
+    async def execute(self, pool: ydb.aio.QuerySessionPool) -> None:
         """
         Execute operations using the configured execution mode.
 
@@ -59,7 +59,7 @@ class BaseExecutor:
         else:
             await self._execute_pooled(pool)
 
-    async def _execute_pooled(self, pool: ydb.aio.QuerySessionPool):
+    async def _execute_pooled(self, pool: ydb.aio.QuerySessionPool) -> None:
         """
         Execute operations using pool's retry mechanism.
 
@@ -71,7 +71,7 @@ class BaseExecutor:
             await pool.retry_operation_async(lambda session: self._execute_operation(session, i))
         logger.info(f"{self.__class__.__name__} [{self._bid_from}, {self._bid_to}] completed")
 
-    async def _execute_single_session(self, pool: ydb.aio.QuerySessionPool):
+    async def _execute_single_session(self, pool: ydb.aio.QuerySessionPool) -> None:
         """
         Execute operations using a single acquired session.
 
@@ -87,7 +87,7 @@ class BaseExecutor:
             await pool.release(session)
         logger.info(f"{self.__class__.__name__} [{self._bid_from}, {self._bid_to}] completed")
 
-    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
+    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int) -> None:
         """
         Abstract method to be implemented by subclasses.
         Executes a single operation (transaction, initialization, etc.)

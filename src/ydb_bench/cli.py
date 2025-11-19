@@ -2,6 +2,7 @@
 import logging
 import re
 from multiprocessing import Pool
+from typing import Any, Optional, Tuple
 
 import click
 
@@ -15,7 +16,14 @@ logging.basicConfig(
 )
 
 
-def create_runner_from_config(endpoint, database, cert_file, user, password, table_folder):
+def create_runner_from_config(
+    endpoint: str,
+    database: str,
+    cert_file: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+    table_folder: str,
+) -> Runner:
     """
     Create a Runner instance from configuration.
 
@@ -40,7 +48,9 @@ def create_runner_from_config(endpoint, database, cert_file, user, password, tab
     )
 
 
-def _run_job_worker(args):
+def _run_job_worker(
+    args: Tuple[int, str, str, Optional[str], Optional[str], Optional[str], str, int, int, int, bool, Optional[str]],
+) -> Optional[Any]:
     """
     Worker function for multiprocessing that runs a single job.
     Must be at module level to be picklable.
@@ -88,7 +98,7 @@ def _run_job_worker(args):
         return None
 
 
-def validate_table_folder(_ctx, _param, table_folder: str) -> str:
+def validate_table_folder(_ctx: Any, _param: Any, table_folder: str) -> str:
     """
     Validate and sanitize table folder name to prevent SQL injection.
     """
@@ -133,7 +143,16 @@ def validate_table_folder(_ctx, _param, table_folder: str) -> str:
     help="Number of branches to create (default: 100)",
 )
 @click.pass_context
-def cli(ctx, endpoint, database, ca_file, user, password, prefix_path, scale):
+def cli(
+    ctx: click.Context,
+    endpoint: str,
+    database: str,
+    ca_file: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+    prefix_path: str,
+    scale: int,
+) -> None:
     """YDB pgbench-like workload tool."""
 
     # Store common configuration in context
@@ -149,7 +168,7 @@ def cli(ctx, endpoint, database, ca_file, user, password, prefix_path, scale):
 
 @cli.command()
 @click.pass_context
-def init(ctx):
+def init(ctx: click.Context) -> None:
     """Initialize database tables with test data."""
     # Get common configuration from context
     endpoint = ctx.obj["endpoint"]
@@ -202,7 +221,14 @@ def init(ctx):
     help="Path to file containing SQL script to execute",
 )
 @click.pass_context
-def run(ctx, client, jobs, transactions, single_session, file):
+def run(
+    ctx: click.Context,
+    client: int,
+    jobs: int,
+    transactions: int,
+    single_session: bool,
+    file: Optional[str],
+) -> None:
     """Run workload against the database."""
     # Get common configuration from context
     endpoint = ctx.obj["endpoint"]

@@ -35,7 +35,7 @@ class Initializer(BaseExecutor):
         count = bid_to - bid_from + 1
         super().__init__(bid_from, bid_to, count, metrics_collector, table_folder, use_single_session)
 
-    async def create_tables(self, pool: ydb.aio.QuerySessionPool):
+    async def create_tables(self, pool: ydb.aio.QuerySessionPool) -> None:
         """Create the pgbench tables in the database."""
         await pool.execute_with_retries(
             f"""
@@ -82,7 +82,7 @@ class Initializer(BaseExecutor):
             """
         )
 
-    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
+    async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int) -> None:
         """
         Fill data for a single branch.
 

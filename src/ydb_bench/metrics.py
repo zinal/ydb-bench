@@ -2,7 +2,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class MetricsCollector:
         error_message: str = "",
         server_duration_us: int = 0,
         server_cpu_time_us: int = 0,
-    ):
+    ) -> None:
         """
         Record a transaction's metrics.
 
@@ -72,7 +72,7 @@ class MetricsCollector:
             )
         )
 
-    def merge(self, other: "MetricsCollector"):
+    def merge(self, other: "MetricsCollector") -> None:
         """
         Merge transactions from another MetricsCollector into this one.
 
@@ -84,7 +84,7 @@ class MetricsCollector:
         if other._start_time < self._start_time:
             self._start_time = other._start_time
 
-    def _calculate_percentiles(self, values: List[float]) -> dict:
+    def _calculate_percentiles(self, values: List[float]) -> Dict[str, float]:
         """Calculate percentiles for a list of values."""
         if not values:
             return {
@@ -118,7 +118,7 @@ class MetricsCollector:
             "p99": p99,
         }
 
-    def get_summary(self) -> dict:
+    def get_summary(self) -> Dict[str, Any]:
         """
         Calculate and return summary statistics.
 
@@ -167,7 +167,7 @@ class MetricsCollector:
             "server_cpu_time": server_cpu_time_stats,
         }
 
-    def print_summary(self):
+    def print_summary(self) -> None:
         """Print formatted metrics summary to stdout (not as log)."""
         summary = self.get_summary()
 

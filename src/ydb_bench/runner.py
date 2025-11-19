@@ -2,10 +2,11 @@ import asyncio
 import logging
 import math
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import AsyncIterator, Optional, Sequence, Tuple
 
 import ydb
 
+from .base_executor import BaseExecutor
 from .metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class Runner:
         self._table_folder = table_folder
 
     @asynccontextmanager
-    async def _get_pool(self):
+    async def _get_pool(self) -> AsyncIterator[ydb.aio.QuerySessionPool]:
         """
         Async context manager that creates and yields a YDB QuerySessionPool.
         Handles driver initialization, connection waiting, and cleanup.
@@ -62,7 +63,7 @@ class Runner:
             async with ydb.aio.QuerySessionPool(driver) as pool:
                 yield pool
 
-    async def _run_executors_parallel(self, pool: ydb.aio.QuerySessionPool, executors: list):
+    async def _run_executors_parallel(self, pool: ydb.aio.QuerySessionPool, executors: Sequence[BaseExecutor]) -> None:
         """
         Run multiple executors in parallel using asyncio.gather.
 
@@ -72,7 +73,7 @@ class Runner:
         """
         await asyncio.gather(*[executor.execute(pool) for executor in executors])
 
-    def init_tables(self, scale: int = 100, job_count: int = 10):
+    def init_tables(self, scale: int = 100, job_count: int = 10) -> None:
         """
         Initialize database tables with the specified scale factor.
 
@@ -88,7 +89,7 @@ class Runner:
             bid_from, bid_to = Runner._make_bid_range(scale, job_count, i)
             initializers.append(Initializer(bid_from, bid_to, table_folder=self._table_folder))
 
-        async def _init():
+        async def _init() -> None:
             async with self._get_pool() as pool:
                 # Create tables first (DDL operations)
                 initer = Initializer(1, scale, table_folder=self._table_folder)
@@ -106,7 +107,7 @@ class Runner:
         scale: int = 100,
         use_single_session: bool = False,
         script: Optional[str] = None,
-    ):
+    ) -> MetricsCollector:
         """
         Run workload with specified number of jobs and transactions.
 
@@ -137,7 +138,7 @@ class Runner:
                 )
             )
 
-        async def _run():
+        async def _run() -> None:
             mode = "single session" if use_single_session else "pooled"
             logger.info(f"Starting workload in {mode} mode")
 
@@ -154,7 +155,7 @@ class Runner:
         # Return metrics without printing (caller will handle printing)
         return metrics
 
-    async def _validate_scale(self, pool: ydb.aio.QuerySessionPool, scale: int):
+    async def _validate_scale(self, pool: ydb.aio.QuerySessionPool, scale: int) -> None:
         """
         Validate that the requested scale doesn't exceed the number of branches in the database.
 
@@ -184,7 +185,7 @@ class Runner:
         logger.info(f"Scale validation passed: {scale} <= {branch_count} branches")
 
     @staticmethod
-    def _make_bid_range(scale: int, job_count: int, job_index: int):
+    def _make_bid_range(scale: int, job_count: int, job_index: int) -> Tuple[int, int]:
         return (
             math.floor(float(scale) / job_count * job_index) + 1,
             math.floor(float(scale) / job_count * (job_index + 1)),
