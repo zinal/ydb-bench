@@ -64,15 +64,13 @@ class Runner:
 
     async def _run_executors_parallel(self, pool: ydb.aio.QuerySessionPool, executors: list):
         """
-        Run multiple executors in parallel using TaskGroup.
+        Run multiple executors in parallel using asyncio.gather.
 
         Args:
             pool: YDB query session pool
             executors: List of BaseExecutor instances to run in parallel
         """
-        async with asyncio.TaskGroup() as tg:
-            for executor in executors:
-                tg.create_task(executor.execute(pool))
+        await asyncio.gather(*[executor.execute(pool) for executor in executors])
 
     def init_tables(self, scale: int = 100, job_count: int = 10):
         """
