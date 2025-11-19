@@ -1,28 +1,30 @@
-import ydb
 from typing import Optional
-from .constants import TELLERS_PER_BRANCH, ACCOUNTS_PER_BRANCH
-from .metrics import MetricsCollector
+
+import ydb
+
 from .base_executor import BaseExecutor
+from .constants import ACCOUNTS_PER_BRANCH, TELLERS_PER_BRANCH
+from .metrics import MetricsCollector
 
 
 class Initializer(BaseExecutor):
     """
     Initializes pgbench database schema and data.
-    
+
     Uses sequential branch processing within the range.
     """
-    
+
     def __init__(
         self,
         bid_from: int,
         bid_to: int,
         metrics_collector: Optional[MetricsCollector] = None,
         table_folder: str = "pgbench",
-        use_single_session: bool = False
+        use_single_session: bool = False,
     ):
         """
         Initialize Initializer with branch range.
-        
+
         Args:
             bid_from: Starting branch ID (inclusive)
             bid_to: Ending branch ID (inclusive)
@@ -83,13 +85,13 @@ class Initializer(BaseExecutor):
     async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
         """
         Fill data for a single branch.
-        
+
         Args:
             session: YDB query session
             iteration: Current iteration number (0-based)
         """
         bid = self._bid_from + iteration
-        
+
         async with session.transaction() as tx:
             await tx.execute(
                 f"""
@@ -123,9 +125,9 @@ class Initializer(BaseExecutor):
                     ) t
                 """,
                 parameters={
-                        "$bid": ydb.TypedValue(bid, ydb.PrimitiveType.Int32),
-                        "$tellers_per_branch": ydb.TypedValue(TELLERS_PER_BRANCH, ydb.PrimitiveType.Int32),
-                        "$accounts_per_branch": ydb.TypedValue(ACCOUNTS_PER_BRANCH, ydb.PrimitiveType.Int32)
+                    "$bid": ydb.TypedValue(bid, ydb.PrimitiveType.Int32),
+                    "$tellers_per_branch": ydb.TypedValue(TELLERS_PER_BRANCH, ydb.PrimitiveType.Int32),
+                    "$accounts_per_branch": ydb.TypedValue(ACCOUNTS_PER_BRANCH, ydb.PrimitiveType.Int32),
                 },
-                commit_tx=True
+                commit_tx=True,
             )

@@ -1,12 +1,14 @@
-import ydb
 import logging
-import time
 import re
+import time
 from random import randint
 from typing import Optional
-from .constants import TELLERS_PER_BRANCH, ACCOUNTS_PER_BRANCH, DEFAULT_SCRIPT
-from .metrics import MetricsCollector
+
+import ydb
+
 from .base_executor import BaseExecutor
+from .constants import ACCOUNTS_PER_BRANCH, DEFAULT_SCRIPT, TELLERS_PER_BRANCH
+from .metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +16,10 @@ logger = logging.getLogger(__name__)
 class Job(BaseExecutor):
     """
     Executes pgbench-like workload transactions.
-    
+
     Uses random branch selection within the range for each transaction.
     """
-    
+
     def __init__(
         self,
         bid_from: int,
@@ -26,11 +28,11 @@ class Job(BaseExecutor):
         metrics_collector: Optional[MetricsCollector] = None,
         table_folder: str = "pgbench",
         use_single_session: bool = False,
-        script: Optional[str] = None
+        script: Optional[str] = None,
     ):
         """
         Initialize a job that executes transactions.
-        
+
         Args:
             bid_from: Starting branch ID (inclusive)
             bid_to: Ending branch ID (inclusive)
@@ -40,29 +42,36 @@ class Job(BaseExecutor):
             use_single_session: If True, use single session mode; if False, use pooled mode
             script: SQL script to execute (default: DEFAULT_SCRIPT from constants)
         """
-        super().__init__(bid_from, bid_to, tran_count, metrics_collector, table_folder, use_single_session)
-        
+        super().__init__(
+            bid_from,
+            bid_to,
+            tran_count,
+            metrics_collector,
+            table_folder,
+            use_single_session,
+        )
+
         # Use default script if none provided
         script_template = script if script is not None else DEFAULT_SCRIPT
-        
+
         # Format script with table_folder in constructor
         self._script = script_template.format(table_folder=self._table_folder)
-        
+
         # Detect which parameters are used in the script
-        self._uses_bid = '$bid' in self._script
-        self._uses_tid = '$tid' in self._script
-        self._uses_aid = '$aid' in self._script
-        self._uses_delta = '$delta' in self._script
-        self._uses_iteration = '$iteration' in self._script
+        self._uses_bid = "$bid" in self._script
+        self._uses_tid = "$tid" in self._script
+        self._uses_aid = "$aid" in self._script
+        self._uses_delta = "$delta" in self._script
+        self._uses_iteration = "$iteration" in self._script
 
     def _build_parameters(self, iteration: int) -> dict:
         """
         Build parameters dictionary based on what's used in the script.
         Generates random values for bid, tid, aid, and delta.
-        
+
         Args:
             iteration: Current iteration number
-            
+
         Returns:
             Dictionary of parameters for the query
         """
@@ -71,7 +80,7 @@ class Job(BaseExecutor):
         tid = (bid - 1) * TELLERS_PER_BRANCH + randint(1, TELLERS_PER_BRANCH)
         aid = (bid - 1) * ACCOUNTS_PER_BRANCH + randint(1, ACCOUNTS_PER_BRANCH)
         delta = randint(1, 1000)
-        
+
         parameters = {}
         if self._uses_bid:
             parameters["$bid"] = ydb.TypedValue(bid, ydb.PrimitiveType.Int32)
@@ -88,7 +97,7 @@ class Job(BaseExecutor):
     async def _execute_operation(self, session: ydb.aio.QuerySession, iteration: int):
         """
         Execute a single pgbench-like transaction.
-        
+
         Args:
             session: YDB query session
             iteration: Current iteration number (0-based)
@@ -98,11 +107,11 @@ class Job(BaseExecutor):
         error_message = ""
         total_duration_us = 0
         total_cpu_time_us = 0
-        
+
         try:
             # Build parameters dictionary with random values
             parameters = self._build_parameters(iteration)
-            
+
             async with session.transaction() as tx:
                 async with await tx.execute(
                     self._script,
@@ -118,7 +127,7 @@ class Job(BaseExecutor):
             success = True
         except Exception as e:
             error_message = e.message
-            
+
             raise
         finally:
             end_time = time.time()
@@ -129,5 +138,5 @@ class Job(BaseExecutor):
                     success,
                     error_message,
                     total_duration_us,
-                    total_cpu_time_us
+                    total_cpu_time_us,
                 )

@@ -35,6 +35,8 @@ dev = [
     "pytest>=7.0.0",
     "black>=22.0.0",
     "flake8>=4.0.0",
+    "isort>=7.0.0",
+    "pyproject-flake8>=7.0.0"
 ]
 
 [project.scripts]
@@ -51,3 +53,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["ydb_bench*"]
+
+[tool.flake8]
+max-line-length = 120
+
+[tool.black]
+line-length = 120
