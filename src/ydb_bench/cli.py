@@ -21,7 +21,7 @@ logging.basicConfig(
 def parse_weighted_file_spec(_ctx: Any, _param: Any, values: str) -> Tuple[str, float]:
     """
     Parse a file specification in format 'filename.sql@weight' or 'filename.sql'.
-    
+
     This is a Click callback that validates and parses the file specification.
 
     Args:
@@ -273,9 +273,7 @@ def run(
     else:
         # Multi-process execution
         parallel_runner = ParallelRunner(runner)
-        metrics = parallel_runner.run_parallel(
-            processes, jobs, transactions, single_session, script_selector, preheat
-        )
+        metrics = parallel_runner.run_parallel(processes, jobs, transactions, single_session, script_selector, preheat)
 
     # Print metrics summary
     metrics.print_summary()

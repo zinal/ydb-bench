@@ -110,7 +110,7 @@ class Job(BaseExecutor):
         """
         # Determine if this is a preheat transaction
         is_preheat = iteration < self._preheat
-        
+
         start_time = time.time()
         success = False
         error_message = ""

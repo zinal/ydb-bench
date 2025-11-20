@@ -1,4 +1,5 @@
 """Parallel execution logic for running workloads across multiple processes."""
+
 import sys
 from multiprocessing import Pool
 from typing import Optional
@@ -59,7 +60,7 @@ class ParallelRunner:
         """
         # Split runner into multiple non-overlapping copies
         runners = self.runner.split(processes)
-        
+
         # Prepare arguments for each worker process
         worker_args = [
             (runner, i, jobs, transactions, single_session, script_selector, preheat)

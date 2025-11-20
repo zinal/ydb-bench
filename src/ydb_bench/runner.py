@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def split_range(start: int, end: int, count: int) -> List[Tuple[int, int]]:
     """
     Split range [start, end] into count non-overlapping sub-ranges.
-    
+
     If count exceeds the number of elements in the range, returns count ranges
     where some ranges will be duplicates of single elements.
 
@@ -43,7 +43,7 @@ def split_range(start: int, end: int, count: int) -> List[Tuple[int, int]]:
 
     total_size = end - start + 1
     ranges = []
-    
+
     # When count > total_size, create single-element ranges with duplicates
     if count > total_size:
         for i in range(count):
@@ -60,7 +60,7 @@ def split_range(start: int, end: int, count: int) -> List[Tuple[int, int]]:
             if i == count - 1:
                 range_end = end
             ranges.append((range_start, range_end))
-    
+
     return ranges
 
 
@@ -95,7 +95,7 @@ class Runner:
         self._root_certificates_file = root_certificates_file
         self._user = user
         self._password = password
-        
+
         # Store table folder and bid range for use in operations
         self.table_folder = table_folder
         self.bid_from = bid_from
@@ -114,11 +114,7 @@ class Runner:
             root_certificates = ydb.load_ydb_root_certificate(self._root_certificates_file)
 
         # Create driver configuration
-        config = ydb.DriverConfig(
-            endpoint=self._endpoint,
-            database=self._database,
-            root_certificates=root_certificates
-        )
+        config = ydb.DriverConfig(endpoint=self._endpoint, database=self._database, root_certificates=root_certificates)
 
         # Create credentials from username and password if provided
         credentials = None
@@ -136,16 +132,16 @@ class Runner:
     def split(self, n: int) -> List["Runner"]:
         """
         Split this runner into n non-overlapping copies with different bid ranges.
-        
+
         Args:
             n: Number of copies to create
-            
+
         Returns:
             List of Runner instances, each with a non-overlapping bid range
         """
         ranges = split_range(self.bid_from, self.bid_to, n)
         runners = []
-        
+
         for bid_from, bid_to in ranges:
             runner = Runner(
                 endpoint=self._endpoint,
@@ -158,7 +154,7 @@ class Runner:
                 table_folder=self.table_folder,
             )
             runners.append(runner)
-        
+
         return runners
 
     async def _run_executors_parallel(self, pool: ydb.aio.QuerySessionPool, executors: Sequence[BaseExecutor]) -> None:
@@ -265,7 +261,7 @@ class Runner:
             # Catch all exceptions and store in metrics
             error_msg = f"Process {process_id} (PID: {pid}) failed with error: {str(e)}"
             metrics.unhandled_error_messages.append(error_msg)
-            
+
         return metrics
 
     async def _validate_scale(self, pool: ydb.aio.QuerySessionPool) -> None:
@@ -294,4 +290,6 @@ class Runner:
                 f"Please run 'init' with scale >= {self.bid_to} or reduce the scale parameter."
             )
 
-        logger.info(f"Scale validation passed: bid range [{self.bid_from}, {self.bid_to}] within {branch_count} branches")
+        logger.info(
+            f"Scale validation passed: bid range [{self.bid_from}, {self.bid_to}] within {branch_count} branches"
+        )
