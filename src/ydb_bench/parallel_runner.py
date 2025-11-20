@@ -30,6 +30,7 @@ class ParallelRunner:
     ) -> MetricsCollector:
         """
         Run workload with multiple processes in parallel.
+        Each process gets its own non-overlapping bid range to avoid deadlocks.
 
         Args:
             processes: Number of parallel client processes
@@ -41,15 +42,23 @@ class ParallelRunner:
         Returns:
             Merged MetricsCollector with results from all processes
         """
+        # Split runner into multiple non-overlapping copies
+        runners = self.runner.split(processes)
+        
         # Prepare arguments for each worker process
         worker_args = [
-            (i, jobs, transactions, single_session, script_selector)
-            for i in range(processes)
+            (runner, i, jobs, transactions, single_session, script_selector)
+            for i, runner in enumerate(runners)
         ]
+
+        def run_worker(runner: Runner, process_id: int, jobs: int, transactions: int,
+                      single_session: bool, script_selector: Optional[WeightedScriptSelector]) -> MetricsCollector:
+            """Worker function that runs a runner instance."""
+            return runner.run(process_id, jobs, transactions, single_session, script_selector)
 
         with Pool(processes) as pool:
             # Collect metrics from all worker processes
-            results = pool.starmap(self.runner.run, worker_args)
+            results = pool.starmap(run_worker, worker_args)
 
         # Merge all metrics into a single collector
         merged_metrics = MetricsCollector()

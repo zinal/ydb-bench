@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional, Sequence, Tuple
+from typing import AsyncIterator, List, Optional, Sequence, Tuple
 
 import ydb
 
@@ -15,16 +15,51 @@ from .workload import WeightedScriptSelector
 logger = logging.getLogger(__name__)
 
 
+def split_range(start: int, end: int, count: int) -> List[Tuple[int, int]]:
+    """
+    Split range [start, end] into count non-overlapping sub-ranges.
+
+    Args:
+        start: Start of the range (inclusive)
+        end: End of the range (inclusive)
+        count: Number of sub-ranges to create
+
+    Returns:
+        List of tuples representing (start, end) for each sub-range
+
+    Example:
+        split(1, 100, 4) -> [(1, 25), (26, 50), (51, 75), (76, 100)]
+    """
+    if count <= 0:
+        raise ValueError("count must be positive")
+    if start > end:
+        raise ValueError("start must be <= end")
+
+    total_size = end - start + 1
+    ranges = []
+
+    for i in range(count):
+        range_start = start + math.floor(float(total_size) / count * i)
+        range_end = start + math.floor(float(total_size) / count * (i + 1)) - 1
+        # Adjust last range to include any remainder
+        if i == count - 1:
+            range_end = end
+        ranges.append((range_start, range_end))
+
+    return ranges
+
+
 class Runner:
     def __init__(
         self,
         endpoint: str,
         database: str,
+        bid_from: int,
+        bid_to: int,
         root_certificates_file: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
         table_folder: str = "pgbench",
-        scale: int = 100,
     ):
         """
         Initialize YdbExecutor with YDB connection parameters.
@@ -32,12 +67,20 @@ class Runner:
         Args:
             endpoint: YDB endpoint (e.g., "grpcs://ydb-host:2135")
             database: Database path (e.g., "/Root/database")
+            bid_from: Starting branch ID (inclusive)
+            bid_to: Ending branch ID (inclusive)
             root_certificates_file: Optional path to root certificate file for TLS
             user: Optional username for authentication
             password: Optional password for authentication
             table_folder: Folder name for tables (default: "pgbench")
-            scale: Number of branches (default: 100)
         """
+        # Store connection parameters for creating copies
+        self.endpoint = endpoint
+        self.database = database
+        self.root_certificates_file = root_certificates_file
+        self.user = user
+        self.password = password
+        
         # Load root certificates from file if provided
         root_certificates = None
         if root_certificates_file:
@@ -51,9 +94,10 @@ class Runner:
         if user and password:
             self._credentials = ydb.StaticCredentials(self._config, user=user, password=password)
 
-        # Store table folder and scale for use in operations
+        # Store table folder and bid range for use in operations
         self.table_folder = table_folder
-        self.scale = scale
+        self.bid_from = bid_from
+        self.bid_to = bid_to
 
     @asynccontextmanager
     async def _get_pool(self) -> AsyncIterator[ydb.aio.QuerySessionPool]:
@@ -69,6 +113,34 @@ class Runner:
             async with ydb.aio.QuerySessionPool(driver) as pool:
                 yield pool
 
+    def split(self, n: int) -> List["Runner"]:
+        """
+        Split this runner into n non-overlapping copies with different bid ranges.
+        
+        Args:
+            n: Number of copies to create
+            
+        Returns:
+            List of Runner instances, each with a non-overlapping bid range
+        """
+        ranges = split_range(self.bid_from, self.bid_to, n)
+        runners = []
+        
+        for bid_from, bid_to in ranges:
+            runner = Runner(
+                endpoint=self.endpoint,
+                database=self.database,
+                bid_from=bid_from,
+                bid_to=bid_to,
+                root_certificates_file=self.root_certificates_file,
+                user=self.user,
+                password=self.password,
+                table_folder=self.table_folder,
+            )
+            runners.append(runner)
+        
+        return runners
+
     async def _run_executors_parallel(self, pool: ydb.aio.QuerySessionPool, executors: Sequence[BaseExecutor]) -> None:
         """
         Run multiple executors in parallel using asyncio.gather.
@@ -81,7 +153,7 @@ class Runner:
 
     def init_tables(self, job_count: int = 10) -> None:
         """
-        Initialize database tables with the specified scale factor.
+        Initialize database tables with the specified bid range.
 
         Args:
             job_count: Number of parallel jobs for filling tables (default: 10)
@@ -90,14 +162,14 @@ class Runner:
 
         # Create initializer instances for parallel execution
         initializers = []
-        for i in range(job_count):
-            bid_from, bid_to = Runner._make_bid_range(self.scale, job_count, i)
+        ranges = split_range(self.bid_from, self.bid_to, job_count)
+        for bid_from, bid_to in ranges:
             initializers.append(Initializer(bid_from, bid_to, table_folder=self.table_folder))
 
         async def _init() -> None:
             async with self._get_pool() as pool:
                 # Create tables first (DDL operations)
-                initer = Initializer(1, self.scale, table_folder=self.table_folder)
+                initer = Initializer(self.bid_from, self.bid_to, table_folder=self.table_folder)
                 await initer.create_tables(pool)
 
                 # Fill tables in parallel
@@ -137,12 +209,12 @@ class Runner:
         try:
             # Create job instances for parallel execution
             jobs = []
-            for i in range(job_count):
-                bid_from, bid_to = Runner._make_bid_range(self.scale, job_count, i)
+            ranges = split_range(self.bid_from, self.bid_to, job_count)
+            for job_bid_from, job_bid_to in ranges:
                 jobs.append(
                     Job(
-                        bid_from,
-                        bid_to,
+                        job_bid_from,
+                        job_bid_to,
                         tran_count,
                         metrics,
                         self.table_folder,
@@ -173,7 +245,7 @@ class Runner:
 
     async def _validate_scale(self, pool: ydb.aio.QuerySessionPool) -> None:
         """
-        Validate that the requested scale doesn't exceed the number of branches in the database.
+        Validate that the requested scale is valid and within the initialized branches.
 
         Args:
             pool: YDB query session pool
@@ -191,17 +263,10 @@ class Runner:
             branch_count = row["branch_count"]
             break
 
-        if self.scale > branch_count:
+        if self.bid_to > branch_count:
             raise ValueError(
-                f"Scale {self.scale} exceeds the number of initialized branches ({branch_count}). "
-                f"Please run 'init' with scale >= {self.scale} or reduce the scale parameter."
+                f"Bid range [{self.bid_from}, {self.bid_to}] exceeds the number of initialized branches ({branch_count}). "
+                f"Please run 'init' with scale >= {self.bid_to} or reduce the scale parameter."
             )
 
-        logger.info(f"Scale validation passed: {self.scale} <= {branch_count} branches")
-
-    @staticmethod
-    def _make_bid_range(scale: int, job_count: int, job_index: int) -> Tuple[int, int]:
-        return (
-            math.floor(float(scale) / job_count * job_index) + 1,
-            math.floor(float(scale) / job_count * (job_index + 1)),
-        )
+        logger.info(f"Scale validation passed: bid range [{self.bid_from}, {self.bid_to}] within {branch_count} branches")

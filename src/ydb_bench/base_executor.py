@@ -71,7 +71,7 @@ class BaseExecutor:
             try:
                 await pool.retry_operation_async(lambda session: self._execute_operation(session, i))
             except Exception as e:
-                logging.error('Retry limit exceeded')
+                logging.error("Retry limit exceeded")
                 logging.error(e)
         logger.info(f"{self.__class__.__name__} [{self._bid_from}, {self._bid_to}] completed")
 

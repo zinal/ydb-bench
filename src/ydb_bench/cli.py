@@ -168,16 +168,20 @@ def cli(
     """YDB pgbench-like workload tool."""
 
     # Create Runner instance and store in context
+    # Convert scale to bid_from and bid_to
     ctx.ensure_object(dict)
     ctx.obj["runner"] = Runner(
         endpoint=endpoint,
         database=database,
+        bid_from=1,
+        bid_to=scale,
         root_certificates_file=ca_file,
         user=user,
         password=password,
         table_folder=prefix_path,
-        scale=scale,
     )
+    # Store scale for display purposes
+    ctx.obj["scale"] = scale
 
 
 @cli.command()
@@ -185,8 +189,9 @@ def cli(
 def init(ctx: click.Context) -> None:
     """Initialize database tables with test data."""
     runner = ctx.obj["runner"]
+    scale = ctx.obj["scale"]
 
-    click.echo(f"Initializing database with prefix_path={runner.table_folder}, scale={runner.scale}")
+    click.echo(f"Initializing database with prefix_path={runner.table_folder}, scale={scale}")
 
     runner.init_tables()
 
@@ -238,13 +243,14 @@ def run(
 ) -> None:
     """Run workload against the database."""
     runner = ctx.obj["runner"]
+    scale = ctx.obj["scale"]
 
     # Create script selector from parsed file specifications
     script_selector = create_script_selector(file, runner.table_folder)
 
     mode = "single session" if single_session else "pooled"
     click.echo(
-        f"Running workload with prefix_path={runner.table_folder}, scale={runner.scale}, jobs={jobs}, transactions={transactions}, client={processes}, mode={mode}"
+        f"Running workload with prefix_path={runner.table_folder}, scale={scale}, jobs={jobs}, transactions={transactions}, client={processes}, mode={mode}"
     )
 
     if processes == 1:
