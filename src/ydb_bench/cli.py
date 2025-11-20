@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 
 
-def parse_weighted_file_spec(_ctx: Any, _param: Any, value: str) -> Tuple[str, float]:
+def parse_weighted_file_spec(_ctx: Any, _param: Any, values: str) -> Tuple[str, float]:
     """
     Parse a file specification in format 'filename.sql@weight' or 'filename.sql'.
     
@@ -35,19 +35,22 @@ def parse_weighted_file_spec(_ctx: Any, _param: Any, value: str) -> Tuple[str, f
     Raises:
         click.BadParameter: If weight syntax is invalid
     """
-    if "@" in value:
-        filepath, weight_str = value.rsplit("@", 1)
-        try:
-            weight = float(weight_str)
-            if weight <= 0:
-                raise click.BadParameter(f"Weight must be positive in: {value}")
-        except ValueError:
-            raise click.BadParameter(f"Invalid weight syntax in: {value}. Expected format: file.sql@weight")
-    else:
-        filepath = value
-        weight = 1.0
+    result = []
+    for value in values:
+        if "@" in value:
+            filepath, weight_str = value.rsplit("@", 1)
+            try:
+                weight = float(weight_str)
+                if weight <= 0:
+                    raise click.BadParameter(f"Weight must be positive in: {value}")
+            except ValueError:
+                raise click.BadParameter(f"Invalid weight syntax in: {value}. Expected format: file.sql@weight")
+        else:
+            filepath = value
+            weight = 1.0
 
-    return (filepath, weight)
+        result.append((filepath, weight))
+    return result
 
 
 def create_workload_script(filepath: str, weight: float, table_folder: str) -> WorkloadScript:
@@ -94,6 +97,9 @@ def create_script_selector(
         WeightedScriptSelector instance if files provided, None otherwise
     """
     if not file_specs:
+        return None
+
+    if not file_specs[0]:
         return None
 
     scripts = []
