@@ -2,11 +2,11 @@
 import logging
 import os
 import re
-from multiprocessing import Pool
 from typing import Any, Optional, Tuple
 
 import click
 
+from .parallel_runner import ParallelRunner
 from .runner import Runner
 from .workload import WeightedScriptSelector, WorkloadScript
 
@@ -16,38 +16,6 @@ logging.basicConfig(
     format="%(asctime)s - PID:%(process)d - %(name)s - %(levelname)s - %(message)s",
     stream=__import__("sys").stderr,
 )
-
-
-def create_runner_from_config(
-    endpoint: str,
-    database: str,
-    cert_file: Optional[str],
-    user: Optional[str],
-    password: Optional[str],
-    table_folder: str,
-) -> Runner:
-    """
-    Create a Runner instance from configuration.
-
-    Args:
-        endpoint: YDB endpoint
-        database: Database path
-        cert_file: Path to certificate file
-        user: Username
-        password: Password
-        table_folder: Folder name for tables
-
-    Returns:
-        Runner instance
-    """
-    return Runner(
-        endpoint=endpoint,
-        database=database,
-        root_certificates_file=cert_file,
-        user=user,
-        password=password,
-        table_folder=table_folder,
-    )
 
 
 def parse_weighted_file_spec(_ctx: Any, _param: Any, value: str) -> Tuple[str, float]:
@@ -112,56 +80,34 @@ def create_workload_script(filepath: str, weight: float, table_folder: str) -> W
     return WorkloadScript(filepath, content, weight, table_folder)
 
 
-def _run_job_worker(
-    args: Tuple[
-        int, str, str, Optional[str], Optional[str], Optional[str], str, int, int, int, bool, Optional[WeightedScriptSelector]
-    ],
-) -> Optional[Any]:
+def create_script_selector(
+    file_specs: Tuple[Tuple[str, float], ...], table_folder: str
+) -> Optional[WeightedScriptSelector]:
     """
-    Worker function for multiprocessing that runs a single job.
-    Must be at module level to be picklable.
+    Create a WeightedScriptSelector from file specifications.
 
     Args:
-        args: Tuple of (process_id, endpoint, database, ca_file, user, password,
-              table_folder, jobs, transactions, scale, single_session, script_selector)
+        file_specs: Tuple of (filepath, weight) tuples
+        table_folder: Table folder name for script formatting
 
     Returns:
-        MetricsCollector instance with collected metrics, or None on error
+        WeightedScriptSelector instance if files provided, None otherwise
     """
-    import os
-    import sys
-    import traceback
-
-    (
-        process_id,
-        endpoint,
-        database,
-        ca_file,
-        user,
-        password,
-        table_folder,
-        jobs,
-        transactions,
-        scale,
-        single_session,
-        script_selector,
-    ) = args
-
-    pid = os.getpid()
-    click.echo(f"Process {process_id} started (PID: {pid})")
-
-    try:
-        runner = create_runner_from_config(endpoint, database, ca_file, user, password, table_folder)
-        metrics = runner.run(jobs, transactions, scale, single_session, script_selector)
-        return metrics
-    except Exception as e:
-        # Catch all exceptions to prevent unpicklable objects from being sent back
-        # Print error to stderr and exit gracefully
-        error_msg = f"Process {process_id} (PID: {pid}) failed with error: {str(e)}"
-        print(error_msg, file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-        # Don't re-raise to avoid pickle errors with protobuf objects
+    if not file_specs:
         return None
+
+    scripts = []
+    for filepath, weight in file_specs:
+        script = create_workload_script(filepath, weight, table_folder)
+        scripts.append(script)
+        click.echo(f"Loaded script: {script.filepath} (weight: {script.weight})")
+
+    # Create selector
+    script_selector = WeightedScriptSelector(scripts)
+    total_weight = script_selector.total_weight
+    click.echo(f"Total weight: {total_weight}")
+
+    return script_selector
 
 
 def validate_table_folder(_ctx: Any, _param: Any, table_folder: str) -> str:
@@ -221,34 +167,28 @@ def cli(
 ) -> None:
     """YDB pgbench-like workload tool."""
 
-    # Store common configuration in context
+    # Create Runner instance and store in context
     ctx.ensure_object(dict)
-    ctx.obj["endpoint"] = endpoint
-    ctx.obj["database"] = database
-    ctx.obj["ca_file"] = ca_file
-    ctx.obj["user"] = user
-    ctx.obj["password"] = password
-    ctx.obj["prefix_path"] = prefix_path
-    ctx.obj["scale"] = scale
+    ctx.obj["runner"] = Runner(
+        endpoint=endpoint,
+        database=database,
+        root_certificates_file=ca_file,
+        user=user,
+        password=password,
+        table_folder=prefix_path,
+        scale=scale,
+    )
 
 
 @cli.command()
 @click.pass_context
 def init(ctx: click.Context) -> None:
     """Initialize database tables with test data."""
-    # Get common configuration from context
-    endpoint = ctx.obj["endpoint"]
-    database = ctx.obj["database"]
-    ca_file = ctx.obj["ca_file"]
-    user = ctx.obj["user"]
-    password = ctx.obj["password"]
-    prefix_path = ctx.obj["prefix_path"]
-    scale = ctx.obj["scale"]
+    runner = ctx.obj["runner"]
 
-    click.echo(f"Initializing database with prefix_path={prefix_path}, scale={scale}")
+    click.echo(f"Initializing database with prefix_path={runner.table_folder}, scale={runner.scale}")
 
-    runner = create_runner_from_config(endpoint, database, ca_file, user, password, prefix_path)
-    runner.init_tables(scale)
+    runner.init_tables()
 
     click.echo("Initialization completed")
 
@@ -297,75 +237,34 @@ def run(
     file: Tuple[Tuple[str, float], ...],
 ) -> None:
     """Run workload against the database."""
-    # Get common configuration from context
-    endpoint = ctx.obj["endpoint"]
-    database = ctx.obj["database"]
-    ca_file = ctx.obj["ca_file"]
-    user = ctx.obj["user"]
-    password = ctx.obj["password"]
-    prefix_path = ctx.obj["prefix_path"]
-    scale = ctx.obj["scale"]
+    runner = ctx.obj["runner"]
 
     # Create script selector from parsed file specifications
-    script_selector = None
-    if file:
-        scripts = []
-        for filepath, weight in file:
-            script = create_workload_script(filepath, weight, prefix_path)
-            scripts.append(script)
-            click.echo(f"Loaded script: {script.filepath} (weight: {script.weight})")
-
-        # Create selector
-        script_selector = WeightedScriptSelector(scripts)
-        total_weight = script_selector.total_weight
-        click.echo(f"Total weight: {total_weight}")
+    script_selector = create_script_selector(file, runner.table_folder)
 
     mode = "single session" if single_session else "pooled"
     click.echo(
-        f"Running workload with prefix_path={prefix_path}, scale={scale}, jobs={jobs}, transactions={transactions}, client={processes}, mode={mode}"
+        f"Running workload with prefix_path={runner.table_folder}, scale={runner.scale}, jobs={jobs}, transactions={transactions}, client={processes}, mode={mode}"
     )
 
     if processes == 1:
         # Single process execution
-        runner = create_runner_from_config(endpoint, database, ca_file, user, password, prefix_path)
-        metrics = runner.run(jobs, transactions, scale, single_session, script_selector)
-        # Print metrics for single process
-        metrics.print_summary()
+        metrics = runner.run(0, jobs, transactions, single_session, script_selector)
     else:
         # Multi-process execution
-        from .metrics import MetricsCollector
+        parallel_runner = ParallelRunner(runner)
+        metrics = parallel_runner.run_parallel(
+            processes, jobs, transactions, single_session, script_selector
+        )
 
-        # Prepare arguments for each worker process
-        worker_args = [
-            (
-                i,
-                endpoint,
-                database,
-                ca_file,
-                user,
-                password,
-                prefix_path,
-                jobs,
-                transactions,
-                scale,
-                single_session,
-                script_selector,
-            )
-            for i in range(processes)
-        ]
+    # Print any unhandled errors
+    if metrics.unhandled_error_messages:
+        click.echo("\nUnhandled errors occurred:", err=True)
+        for error_msg in metrics.unhandled_error_messages:
+            click.echo(f"  {error_msg}", err=True)
 
-        with Pool(processes) as pool:
-            # Collect metrics from all worker processes
-            results = pool.map(_run_job_worker, worker_args)
-
-        # Merge all metrics into a single collector
-        merged_metrics = MetricsCollector()
-        for result in results:
-            if result is not None:  # Skip failed processes
-                merged_metrics.merge(result)
-
-        # Print merged metrics once
-        merged_metrics.print_summary()
+    # Print metrics summary
+    metrics.print_summary()
 
     click.echo("Workload completed")
 

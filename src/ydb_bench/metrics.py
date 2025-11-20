@@ -40,6 +40,7 @@ class MetricsCollector:
 
     transactions: List[TransactionMetrics] = field(default_factory=list)
     _start_time: float = field(default_factory=time.time)
+    unhandled_error_messages: List[str] = field(default_factory=list)
 
     def record_transaction(
         self,
@@ -80,6 +81,7 @@ class MetricsCollector:
             other: Another MetricsCollector instance to merge from
         """
         self.transactions.extend(other.transactions)
+        self.unhandled_error_messages.extend(other.unhandled_error_messages)
         # Update start time to the earliest one
         if other._start_time < self._start_time:
             self._start_time = other._start_time
