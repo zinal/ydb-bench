@@ -36,6 +36,9 @@ pip install -e .
 - `YDB_USER` - Имя пользователя для аутентификации (опционально)
 - `YDB_PASSWORD` - Пароль для аутентификации (опционально)
 - `YDB_PREFIX_PATH` - Имя папки для таблиц (по умолчанию: pgbench)
+- `YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS` - Имя файла, содержащего service account key 
+- `YDB_ANONYMOUS_CREDENTIALS` - Анонимное подключение (нужно задать YDB_ANONYMOUS_CREDENTIALS=1)
+- `YDB_ACCESS_TOKEN_CREDENTIALS` - Авторизация по токену. Токен должен быть задан непосредственно в переменной окружения (не в файле)
 
 ### Пример настройки окружения
 

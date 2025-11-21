@@ -120,6 +120,11 @@ class Runner:
         credentials = None
         if self._user and self._password:
             credentials = ydb.StaticCredentials(config, user=self._user, password=self._password)
+        elif self._user:
+            credentials = ydb.StaticCredentials(config, user=self._user)
+        else:
+            credentials = ydb.credentials_from_env_variables()
+            print(credentials)
 
         async with ydb.aio.Driver(driver_config=config, credentials=credentials) as driver:
             await driver.wait()
