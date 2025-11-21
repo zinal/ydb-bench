@@ -55,9 +55,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
+.mypy_cache
 
 # pyenv
 .python-version
@@ -77,3 +75,4 @@ venv.bak/
 run.sh
 init.sh
 *.log
+*.sql

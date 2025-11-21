@@ -53,6 +53,48 @@ def parse_weighted_file_spec(_ctx: Any, _param: Any, values: str) -> Tuple[str, 
     return result
 
 
+def parse_weighted_builtin_spec(_ctx: Any, _param: Any, values: str) -> Tuple[str, float]:
+    """
+    Parse a builtin specification in format 'NAME@weight' or 'NAME'.
+
+    This is a Click callback that validates and parses the builtin specification.
+
+    Args:
+        _ctx: Click context (unused)
+        _param: Click parameter (unused)
+        values: Builtin specification strings
+
+    Returns:
+        List of tuples of (builtin_name, weight)
+
+    Raises:
+        click.BadParameter: If weight syntax is invalid or builtin name is unknown
+    """
+    result = []
+    valid_builtins = ["tpcb-like"]
+    
+    for value in values:
+        if "@" in value:
+            builtin_name, weight_str = value.rsplit("@", 1)
+            try:
+                weight = float(weight_str)
+                if weight <= 0:
+                    raise click.BadParameter(f"Weight must be positive in: {value}")
+            except ValueError:
+                raise click.BadParameter(f"Invalid weight syntax in: {value}. Expected format: NAME@weight")
+        else:
+            builtin_name = value
+            weight = 1.0
+
+        if builtin_name not in valid_builtins:
+            raise click.BadParameter(
+                f"Unknown builtin name: {builtin_name}. Valid options: {', '.join(valid_builtins)}"
+            )
+
+        result.append((builtin_name, weight))
+    return result
+
+
 def create_workload_script(filepath: str, weight: float, table_folder: str) -> WorkloadScript:
     """
     Create a WorkloadScript from a file path and weight.
@@ -84,29 +126,47 @@ def create_workload_script(filepath: str, weight: float, table_folder: str) -> W
 
 
 def create_script_selector(
-    file_specs: Tuple[Tuple[str, float], ...], table_folder: str
+    file_specs: Tuple[Tuple[str, float], ...],
+    builtin_specs: Tuple[Tuple[str, float], ...],
+    table_folder: str
 ) -> Optional[WeightedScriptSelector]:
     """
-    Create a WeightedScriptSelector from file specifications.
+    Create a WeightedScriptSelector from file and builtin specifications.
 
     Args:
         file_specs: Tuple of (filepath, weight) tuples
+        builtin_specs: Tuple of (builtin_name, weight) tuples
         table_folder: Table folder name for script formatting
 
     Returns:
-        WeightedScriptSelector instance if files provided, None otherwise
+        WeightedScriptSelector instance if files or builtins provided, None otherwise
     """
-    if not file_specs:
-        return None
-
-    if not file_specs[0]:
-        return None
-
+    from .constants import DEFAULT_SCRIPT
+    
     scripts = []
-    for filepath, weight in file_specs:
-        script = create_workload_script(filepath, weight, table_folder)
-        scripts.append(script)
-        click.echo(f"Loaded script: {script.filepath} (weight: {script.weight})")
+    
+    # Add builtin scripts
+    if builtin_specs:
+        for builtin_name, weight in builtin_specs:
+            if builtin_name == "tpcb-like":
+                script = WorkloadScript(
+                    filepath=f"<builtin:{builtin_name}>",
+                    content=DEFAULT_SCRIPT,
+                    weight=weight,
+                    table_folder=table_folder,
+                )
+                scripts.append(script)
+                click.echo(f"Loaded builtin: {builtin_name} (weight: {weight})")
+    
+    # Add file scripts
+    if file_specs:
+        for filepath, weight in file_specs:
+            script = create_workload_script(filepath, weight, table_folder)
+            scripts.append(script)
+            click.echo(f"Loaded script: {script.filepath} (weight: {script.weight})")
+
+    if not scripts:
+        return None
 
     # Create selector
     script_selector = WeightedScriptSelector(scripts)
@@ -244,6 +304,14 @@ def init(ctx: click.Context) -> None:
     callback=parse_weighted_file_spec,
     help="Path to SQL file with optional weight: file.sql@weight (default weight: 1). Can be specified multiple times.",
 )
+@click.option(
+    "--builtin",
+    "-b",
+    multiple=True,
+    type=str,
+    callback=parse_weighted_builtin_spec,
+    help="Add builtin script NAME with optional weight (default: 1). Format: NAME@weight. Currently supported: tpcb-like. Can be specified multiple times.",
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -253,13 +321,18 @@ def run(
     preheat: int,
     single_session: bool,
     file: Tuple[Tuple[str, float], ...],
+    builtin: Tuple[Tuple[str, float], ...],
 ) -> None:
     """Run workload against the database."""
     runner = ctx.obj["runner"]
     scale = ctx.obj["scale"]
 
-    # Create script selector from parsed file specifications
-    script_selector = create_script_selector(file, runner.table_folder)
+    # If neither --file nor --builtin specified, default to builtin tpcb-like
+    if not file and not builtin:
+        builtin = (("tpcb-like", 1.0),)
+
+    # Create script selector from parsed file and builtin specifications
+    script_selector = create_script_selector(file, builtin, runner.table_folder)
 
     mode = "single session" if single_session else "pooled"
     preheat_info = f", preheat={preheat}" if preheat > 0 else ""
