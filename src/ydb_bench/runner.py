@@ -113,20 +113,24 @@ class Runner:
         if self._root_certificates_file:
             root_certificates = ydb.load_ydb_root_certificate(self._root_certificates_file)
 
-        # Create driver configuration
-        config = ydb.DriverConfig(endpoint=self._endpoint, database=self._database, root_certificates=root_certificates)
-
         # Create credentials from username and password if provided
         credentials = None
-        if self._user and self._password:
-            credentials = ydb.StaticCredentials(config, user=self._user, password=self._password)
-        elif self._user:
-            credentials = ydb.StaticCredentials(config, user=self._user)
+        if self._user:
+            credentials = ydb.StaticCredentials.from_user_password(self._user, self._password)
         else:
             credentials = ydb.credentials_from_env_variables()
             print(credentials)
 
-        async with ydb.aio.Driver(driver_config=config, credentials=credentials) as driver:
+        # Create driver configuration
+        config = ydb.DriverConfig(
+            endpoint=self._endpoint,
+            database=self._database,
+            root_certificates=root_certificates,
+            credentials=credentials,
+            use_all_nodes=True,
+        )
+
+        async with ydb.aio.Driver(driver_config=config) as driver:
             await driver.wait()
             logger.info("Connected to YDB")
             await asyncio.sleep(3)  # Required to make node discovery work
