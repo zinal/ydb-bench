@@ -366,6 +366,11 @@ def init(ctx: click.Context, file: str) -> None:
     callback=parse_weighted_builtin_spec,
     help="Add builtin script NAME with optional weight (default: 1). Format: NAME@weight. Currently supported: tpcb-like. Can be specified multiple times.",
 )
+@click.option(
+    "--no-validate-scale",
+    is_flag=True,
+    help="Disable scale validation (useful for custom workloads that don't use standard tables)",
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -377,6 +382,7 @@ def run(
     single_session: bool,
     file: Tuple[Tuple[str, float], ...],
     builtin: Tuple[Tuple[str, float], ...],
+    no_validate_scale: bool,
 ) -> None:
     """Run workload against the database."""
     runner = ctx.obj["runner"]
@@ -418,12 +424,12 @@ def run(
 
     if processes == 1:
         # Single process execution
-        metrics = runner.run(workload_start_time, duration, duration_unit, 0, jobs, single_session, script_selector)
+        metrics = runner.run(workload_start_time, duration, duration_unit, 0, jobs, single_session, script_selector, no_validate_scale)
     else:
         # Multi-process execution
         parallel_runner = ParallelRunner(runner)
         metrics = parallel_runner.run_parallel(
-            workload_start_time, duration, duration_unit, processes, jobs, single_session, script_selector
+            workload_start_time, duration, duration_unit, processes, jobs, single_session, script_selector, no_validate_scale
         )
 
     # Print metrics summary

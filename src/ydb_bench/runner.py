@@ -215,6 +215,7 @@ class Runner:
         job_count: int = 7,
         use_single_session: bool = False,
         script_selector: Optional[WeightedScriptSelector] = None,
+        skip_scale_validation: bool = False,
     ) -> MetricsCollector:
         """
         Run workload with specified number of jobs and transactions.
@@ -227,6 +228,7 @@ class Runner:
             use_single_session: If True, use single session mode; if False, use pooled mode (default)
             script_selector: Optional WeightedScriptSelector for multiple weighted scripts (if None, uses default script)
             preheat: Number of preheat transactions to run before counting metrics (default: 0)
+            skip_scale_validation: If True, skip scale validation (useful for custom workloads)
 
         Returns:
             MetricsCollector instance with collected metrics
@@ -263,8 +265,9 @@ class Runner:
                 logger.info(f"Starting workload in {mode} mode")
 
                 async with self._get_pool() as pool:
-                    # Validate scale before starting jobs
-                    await self._validate_scale(pool)
+                    # Validate scale before starting jobs (unless skipped)
+                    if not skip_scale_validation:
+                        await self._validate_scale(pool)
 
                     # Run jobs in parallel
                     await self._run_executors_parallel(pool, jobs)
@@ -287,10 +290,19 @@ class Runner:
 
         Raises:
             ValueError: If scale exceeds the number of branches in the database
+            RuntimeError: If branches table doesn't exist (init not run)
         """
-        result = await pool.execute_with_retries(
-            f"SELECT COUNT(*) as branch_count FROM `{self.table_folder}/branches`;"
-        )
+        try:
+            result = await pool.execute_with_retries(
+                f"SELECT COUNT(*) as branch_count FROM `{self.table_folder}/branches`;"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to query branches table. "
+                f"Database may not be initialized. "
+                f"Please run 'init' command first with appropriate --scale parameter. "
+                f"Original error: {str(e)}"
+            )
 
         # Extract the count from result
         branch_count = 0
@@ -300,14 +312,14 @@ class Runner:
 
         if self.bid_from > branch_count:
             raise ValueError(
-                f"Scale parameter exceeds the number of initialized branches ({branch_count}). "
-                f"Please run test with scale = {branch_count}."
+                f"Scale validation failed: requested scale starts at {self.bid_from} but only {branch_count} branches exist. "
+                f"Please run 'init' with --scale >= {self.bid_from} or reduce the --scale parameter for 'run' command."
             )
 
         if self.bid_to > branch_count:
             raise ValueError(
-                f"Bid range [{self.bid_from}, {self.bid_to}] exceeds the number of initialized branches ({branch_count}). "
-                f"Please run 'init' with scale >= {self.bid_to} or reduce the scale parameter."
+                f"Scale validation failed: requested scale {self.bid_to} exceeds initialized branches ({branch_count}). "
+                f"Please run 'init' with --scale >= {self.bid_to} or reduce the --scale parameter for 'run' command to {branch_count}."
             )
 
         logger.info(

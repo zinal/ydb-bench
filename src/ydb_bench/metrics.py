@@ -107,7 +107,8 @@ class MetricsCollector:
 
         sorted_values = sorted(values)
         avg = sum(sorted_values) / len(sorted_values)
-        stddev = statistics.stdev(sorted_values)
+        # stdev requires at least 2 data points
+        stddev = statistics.stdev(sorted_values) if len(sorted_values) > 1 else 0.0
         min_val = sorted_values[0]
         max_val = sorted_values[-1]
 
@@ -158,8 +159,41 @@ class MetricsCollector:
                 transaction for transaction in self.transactions if transaction.filepath == target_filepath
             ]
 
+        # Check if filtered transactions is empty
+        if not filtered_transactions:
+            return {
+                "total_duration": 0.0,
+                "total_transactions": 0,
+                "successful_transactions": 0,
+                "failed_transactions": 0,
+                "tps": 0.0,
+                "latency": {},
+                "server_duration": {},
+                "server_cpu_time": {},
+            }
+
         start_times = [t.start_time for t in filtered_transactions if t.success and t.server_duration_us > 0]
         end_times = [t.end_time for t in filtered_transactions if t.success and t.server_cpu_time_us > 0]
+        
+        # Handle case where no successful transactions with timing data exist
+        if not start_times or not end_times:
+            # Fall back to using all transaction times
+            start_times = [t.start_time for t in filtered_transactions]
+            end_times = [t.end_time for t in filtered_transactions]
+        
+        if not start_times or not end_times:
+            # Still no data - return empty summary
+            return {
+                "total_duration": 0.0,
+                "total_transactions": len(filtered_transactions),
+                "successful_transactions": sum(1 for t in filtered_transactions if t.success),
+                "failed_transactions": sum(1 for t in filtered_transactions if not t.success),
+                "tps": 0.0,
+                "latency": {},
+                "server_duration": {},
+                "server_cpu_time": {},
+            }
+        
         min_time = start_times[0]
         max_time = end_times[-1]
 
@@ -226,6 +260,16 @@ class MetricsCollector:
         print(f"Transactions per Second:  {summary['tps']:.2f} TPS", file=sys.stdout)
         print("=" * 90, file=sys.stdout)
 
+        # Only print detailed metrics if we have data
+        lat = summary["latency"]
+        srv_dur = summary["server_duration"]
+        srv_cpu = summary["server_cpu_time"]
+        
+        if not lat or not srv_dur or not srv_cpu:
+            print("\nNo transaction data available for detailed metrics.", file=sys.stdout)
+            print("=" * 90, file=sys.stdout)
+            return
+
         # Print table header
         print(
             f"{'Metric':<15} {'Client duration (ms)':>20} {'Server Duration (ms)':>25} {'CPU Time (ms)':>20}",
@@ -234,10 +278,6 @@ class MetricsCollector:
         print("-" * 90, file=sys.stdout)
 
         # Print statistics rows
-        lat = summary["latency"]
-        srv_dur = summary["server_duration"]
-        srv_cpu = summary["server_cpu_time"]
-
         print(
             f"{'Average':<15} {lat['avg']:>20.2f} {srv_dur['avg']:>25.2f} {srv_cpu['avg']:>20.2f}",
             file=sys.stdout,
@@ -281,6 +321,35 @@ class MetricsCollector:
         sys.stdout.flush()
 
     def print_summary(self) -> None:
+        """Print summary of all metrics, including any errors that occurred."""
+        
+        # First, check if there were any unhandled errors
+        if self.unhandled_error_messages:
+            print("\n" + "=" * 90, file=sys.stderr)
+            print("ERROR: Workload execution failed", file=sys.stderr)
+            print("=" * 90, file=sys.stderr)
+            for error_msg in self.unhandled_error_messages:
+                print(f"{error_msg}", file=sys.stderr)
+            print("=" * 90, file=sys.stderr)
+            print("\nCommon causes:", file=sys.stderr)
+            print("  - Scale parameter exceeds initialized data (run 'init' with appropriate --scale)", file=sys.stderr)
+            print("  - Database tables not initialized (run 'init' command first)", file=sys.stderr)
+            print("  - Connection or permission issues", file=sys.stderr)
+            print("=" * 90 + "\n", file=sys.stderr)
+            sys.stderr.flush()
+
+        # Check if we have any transactions
+        if not self.transactions:
+            print("\n" + "=" * 90, file=sys.stdout)
+            print("WARNING: No transactions were executed", file=sys.stdout)
+            print("=" * 90, file=sys.stdout)
+            print("\nPossible causes:", file=sys.stdout)
+            print("  - Database tables not initialized (run 'init' command first)", file=sys.stdout)
+            print("  - Scale parameter exceeds initialized data", file=sys.stdout)
+            print("  - Workload duration too short", file=sys.stdout)
+            print("=" * 90 + "\n", file=sys.stdout)
+            sys.stdout.flush()
+            return
 
         unique_filepaths = sorted({transaction.filepath for transaction in self.transactions})
         self.print_group("SUMMARY")
