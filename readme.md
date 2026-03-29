@@ -56,15 +56,16 @@ export YDB_PASSWORD="your_password"
 
 ```
 # Использование параметров командной строки (переопределяет переменные окружения)
-ydb-bench init \
+ydb-bench \
   --endpoint "grpcs://ydb-host:2135" \
   --database "/Root/database" \
   --ca-file "./ca.crt" \
   --user "root" \
   --password "your_password" \
   --scale 100 \
-  --prefix-path pgbench
-  --log-level ERROR
+  --prefix-path pgbench \
+  --log-level ERROR \
+  init
 ```
 
 - `--endpoint` - Эндпоинт YDB (например, `grpcs://ydb-host:2135`)
@@ -131,6 +132,7 @@ ydb-bench run --jobs 10 --transactions 100 \
 - `--workload-duration` / `-T` - Продолжительность теста в секундах, в течение которой осуществляется  сборо показателей производительности (по умолчанию: 120 секунд). Является взаимоисключающим с параметром `--transactions`.
 - `--single-session` - Использовать одну постоянную сессию на задачу вместо запроса сессии из пула каждый раз
 - `--file` / `-f` - Путь к файлу с SQL-скриптом для выполнения. Можно указать несколько раз с опциональным весом (см. раздел "Взвешенные нагрузки")
+- `--no-validate-scale` - Отключить проверку соответствия параметра scale количеству инициализированных строк (полезно для пользовательских workload, которые не используют стандартные таблицы)
 
 
 ## Использование параметров в пользовательских SQL-скриптах
@@ -268,7 +270,7 @@ ydb-bench init --scale 50
 ydb-bench run --jobs 10 --transactions 500
 
 # Запуск нагрузки с 4 клиентскими процессами, 25 задач на процесс
-ydb-bench run --process 4 --jobs 25 --transactions 1000
+ydb-bench run --processes 4 --jobs 25 --transactions 1000
 
 # Запуск с пользовательским скриптом
 ydb-bench run --jobs 10 --transactions 100 --file my_script.sql
@@ -278,6 +280,9 @@ ydb-bench run --jobs 10 --transactions 1000 \
   --file read_heavy.sql@70 \
   --file write_heavy.sql@20 \
   --file analytics.sql@10
+
+# Запуск с пользовательским скриптом без проверки scale (для кастомных таблиц)
+ydb-bench run --jobs 10 --transactions 100 --file custom_workload.sql --no-validate-scale
 ```
 
 ##  Распределение bid между процессами и джобами
